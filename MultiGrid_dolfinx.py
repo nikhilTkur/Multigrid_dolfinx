@@ -29,6 +29,10 @@ A_dict = {}
 b_dict = {}  # Format : {level : b}
 A_dict_jacobi = {}  # Format {level : (R_omega , diag_A_inv , level)}
 A_jacobi_store = {}
+a_dolfinx = None
+L_dolfinx = None
+bcs_dolfinx = None
+
 
 for i in range(coarsest_level, finest_level + 1):
     element_size[i] = 1 / (coarsest_level_elements_per_dim * 2**i)
@@ -68,6 +72,9 @@ for i in range(coarsest_level, finest_level + 1):
 
     if i == finest_level:                           # Storing the finest level vector in b_dict
         L = f * v * ufl.dx
+        L_dolfinx = L
+        a_dolfinx = a
+        bcs_dolfinx = bc
         b = dolfinx.fem.create_vector(L)
         with b.localForm() as loc_b:
             loc_b.set(0)
@@ -276,8 +283,19 @@ def FullMultiGrid(A_h, f_h):
         v_h = V_cycle_scheme(A_h, v_h, f_h)
     return v_h
 
- # Assemble the matrices in for Jacobi in A_dict_jacobi
+# Assemble the matrices in for Jacobi in A_dict_jacobi
 
 
 for key, value in A_dict:
     A_dict_jacobi[key] = getJacobiMatrices(value)
+
+# force function assembled and the matrices have been generated. Call the FMG solver with the b vector and store the solution vector
+u = FullMultiGrid(A_dict_jacobi[finest_level], b_dict[finest_level])
+
+# Use the solution vector and convert it to dolfinx plottable format
+
+
+# Computing the dolfinx solution
+problem = dolfinx.fem.LinearProblem(a, L, bcs=[bcs_dolfinx], petsc_options={
+                                    "ksp_type": "preonly", "pc_type": "lu"})
+uh = problem.solve()
