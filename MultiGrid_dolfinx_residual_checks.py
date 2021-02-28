@@ -7,17 +7,26 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from mpi4py import MPI
 from petsc4py import PETSc
+import matplotlib.pyplot as plt
 
 
 finest_level = 3
-coarsest_level = 2
+coarsest_level = 1
 coarsest_level_elements_per_dim = 8
 coarsest_level_nodes_per_dim = coarsest_level_elements_per_dim + 1
-residual_per_iteration = []
+
+residual_iterations_V_cycle = []
+error_iterations_V_cycle = []
+
+residual_iterations_pre_smooth = []
+error_iterations_pre_smooth = []
+
+residual_iterations_post_smooth = []
+error_iterations_post_smooth = []
 # Defining the Parameters of multigrid
-mu0 = 100
-mu1 = 100
-mu2 = 100
+mu0 = 102
+mu1 = 102
+mu2 = 102
 omega = float(2/3)  # Parameter for Jacobi Smoother
 
 
@@ -259,7 +268,7 @@ def Restriction2D(vec_h, level_fine):
     return vec_2h
 
 
-def V_cycle_scheme(A_h, v_h, f_h):
+def V_cycle_scheme(A_h, v_h, f_h, iter_pre, iter_post):
     #v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
     # Check if the space is the coarsest
     if(A_h[2] == coarsest_level):
@@ -267,35 +276,36 @@ def V_cycle_scheme(A_h, v_h, f_h):
         #v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
         return v_h
     else:
-        v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
+        v_h = jacobiRelaxation(A_h, v_h, f_h, iter_pre)
         # f_2h = Restriction2D((f_h - np.matmul(A_dict[A_h[2]], v_h)), A_h[2])
         f_2h = Restriction2D((f_h - A_dict[A_h[2]][0].dot(v_h)), A_h[2])
         v_2h = np.zeros((f_2h.shape[0], 1))
         # Fetch the Smaller discretication matrix
         A_2h = A_dict_jacobi[A_h[2] - 1]
-        v_2h = V_cycle_scheme(A_2h, v_2h, f_2h)
+        v_2h = V_cycle_scheme(A_2h, v_2h, f_2h, iter_pre, iter_post)
     v_h = v_h + Interpolation2D(v_2h, A_h[2] - 1)
     # v_h[v_h.shape[0] - 1] += 0.5
-    v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
+    v_h = jacobiRelaxation(A_h, v_h, f_h, iter_post)
     return v_h
 
 
-def FullMultiGrid(A_h, f_h):
+def FullMultiGrid(A_h, f_h, iter_V, iter_pre, iter_post):
     # Check if the space is the coarsest
     if(A_h[2] == coarsest_level):
-        v_h = np.zeros((f_h.shape[0], 1))
-        for i in range(mu0):
-            v_h = V_cycle_scheme(A_h, v_h, f_h)
+        """v_h = np.zeros((f_h.shape[0], 1))
+        for i in range(iter_V):
+            v_h = V_cycle_scheme(A_h, v_h, f_h)"""
+        v_h = spsolve(A_dict[coarsest_level][0], f_h)
         return v_h
     else:
         f_2h = Restriction2D(f_h, A_h[2])
         # Get the next coarse level of Discretization Matrix
         A_2h = A_dict_jacobi[A_h[2] - 1]
-        v_2h = FullMultiGrid(A_2h, f_2h)
+        v_2h = FullMultiGrid(A_2h, f_2h, iter_V, iter_pre, iter_post)
     v_h = Interpolation2D(v_2h, A_h[2] - 1)
     # v_h[v_h.shape[0] - 1] += 0.5
-    for i in range(mu0):
-        v_h = V_cycle_scheme(A_h, v_h, f_h)
+    for i in range(iter_V):
+        v_h = V_cycle_scheme(A_h, v_h, f_h, iter_pre, iter_post)
     return v_h
 
 # Assemble the matrices in for Jacobi in A_dict_jacobi
@@ -304,14 +314,12 @@ def FullMultiGrid(A_h, f_h):
 for key, value in A_dict.items():
     A_dict_jacobi[key] = getJacobiMatrices(value)
 
-# force function assembled and the matrices have been generated. Call the FMG solver with the b vector and store the solution vector
-u = FullMultiGrid(A_dict_jacobi[finest_level], b_dict[finest_level])
 # Use the solution vector and convert it to dolfinx plottable format
 # Computing the dolfinx solution
 problem = dolfinx.fem.LinearProblem(a_dolfinx, L_dolfinx, bcs=[bcs_dolfinx], petsc_options={
                                     "ksp_type": "preonly", "pc_type": "lu"})
 uh = problem.solve()
-print("Code Working")
+#print("Code Working")
 #print(np.abs(u - uh.compute_point_values()).shape)
 # print(u)
 
@@ -322,7 +330,90 @@ u_exact.vector.ghostUpdate(
     addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 u_exact_vertex_values = u_exact.compute_point_values()
 uh_vertex_values = uh.compute_point_values()
-error_max_dolfinx = np.max(np.abs(u_exact_vertex_values - uh_vertex_values))
-error_max_FMG = np.max(np.abs(u_exact_vertex_values - u))
-print(f'The error in the dolfinx version of the code is {error_max_dolfinx}')
-print(f'The error in the FMG version of the code is {error_max_FMG}')
+error_max_dolfinx = np.max(
+    np.abs(u_exact_vertex_values - uh_vertex_values))
+
+
+for iter_V in range(1, mu0, 10):
+    # force function assembled and the matrices have been generated. Call the FMG solver with the b vector and store the solution vector
+    u = FullMultiGrid(A_dict_jacobi[finest_level],
+                      b_dict[finest_level], iter_V, mu1, mu2)
+    residual = b_dict[finest_level] - A_dict[finest_level][0].dot(u)
+    residual_iterations_V_cycle.append(np.linalg.norm(residual))
+    error_max_FMG = np.max(np.abs(u_exact_vertex_values - u))
+    error_iterations_V_cycle.append(error_max_FMG)
+    #print(f'The error in the dolfinx version of the code is {error_max_dolfinx}')
+    #print(f'The error in the FMG version of the code is {error_max_FMG}')
+
+for iter_pre in range(1, mu1, 10):
+    u = FullMultiGrid(A_dict_jacobi[finest_level],
+                      b_dict[finest_level], mu0, iter_pre, mu2)
+    residual = b_dict[finest_level] - A_dict[finest_level][0].dot(u)
+    residual_iterations_pre_smooth.append(np.linalg.norm(residual))
+    error_max_FMG = np.max(np.abs(u_exact_vertex_values - u))
+    error_iterations_pre_smooth.append(error_max_FMG)
+
+for iter_post in range(1, mu2, 10):
+    u = FullMultiGrid(A_dict_jacobi[finest_level],
+                      b_dict[finest_level], mu0, mu1, iter_post)
+    residual = b_dict[finest_level] - A_dict[finest_level][0].dot(u)
+    residual_iterations_post_smooth.append(np.linalg.norm(residual))
+    error_max_FMG = np.max(np.abs(u_exact_vertex_values - u))
+    error_iterations_post_smooth.append(error_max_FMG)
+
+x_axis = np.arange(1, 102, 10)
+plt.figure(1)
+axis1 = plt.axes()
+axis1.grid(True)
+axis1.semilogy(x_axis, residual_iterations_V_cycle, linewidth=0.5, color='k')
+plt.title("Residual v/s V-Cycle iterations")
+plt.xlabel("Iterations")
+plt.ylabel("Residual")
+plt.savefig("1.png")
+
+plt.figure(2)
+axis2 = plt.axes()
+axis2.grid(True)
+axis2.semilogy(x_axis, residual_iterations_pre_smooth,
+               linewidth=0.5, color='k')
+plt.title("Residual v/s Pre Smoothing Iterations")
+plt.xlabel("Iterations")
+plt.ylabel("Residual")
+plt.savefig("2.png")
+
+plt.figure(3)
+axis3 = plt.axes()
+axis3.grid(True)
+axis3.semilogy(x_axis, residual_iterations_post_smooth,
+               linewidth=0.5, color='k')
+plt.title("Residual v/s Post Smoothing Iterations")
+plt.xlabel("Iterations")
+plt.ylabel("Residual")
+plt.savefig("3.png")
+
+plt.figure(4)
+axis4 = plt.axes()
+axis4.grid(True)
+axis4.semilogy(x_axis, error_iterations_V_cycle, linewidth=0.5, color='k')
+plt.title("Max Error v/s V-cycle Iterations")
+plt.xlabel("Iterations")
+plt.ylabel("Max Error")
+plt.savefig("4.png")
+
+plt.figure(5)
+axis5 = plt.axes()
+axis5.grid(True)
+axis5.semilogy(x_axis, error_iterations_pre_smooth, linewidth=0.5, color='k')
+plt.title("Max Error v/s Pre Smoothing Iterations")
+plt.xlabel("Iterations")
+plt.ylabel("Max Error")
+plt.savefig("5.png")
+
+plt.figure(6)
+axis5 = plt.axes()
+axis5.grid(True)
+axis5.semilogy(x_axis, error_iterations_post_smooth, linewidth=0.5, color='k')
+plt.title("Max Error v/s Post Smoothing Iterations")
+plt.xlabel("Iterations")
+plt.ylabel("Max Error")
+plt.savefig("6.png")
