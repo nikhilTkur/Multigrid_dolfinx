@@ -11,14 +11,14 @@ import matplotlib.pyplot as plt
 
 
 finest_level = 3
-coarsest_level = finest_level - 2
-coarsest_level_elements_per_dim = 4
+coarsest_level = finest_level - 1
+coarsest_level_elements_per_dim = 8
 coarsest_level_nodes_per_dim = coarsest_level_elements_per_dim + 1
 residual_per_iteration = []
 # Defining the Parameters of multigrid
-mu0 = 160
-mu1 = 100
-mu2 = 100
+mu0 = 3
+mu1 = 10
+mu2 = 10
 omega = float(2/3)  # Parameter for Jacobi Smoother
 
 # Plotting Variables
@@ -111,6 +111,13 @@ for i in range(coarsest_level, finest_level + 1):
 
 def getJacobiMatrices(A):
     A_mat = A[0]
+    A_mat_diag = A_mat.diagonal()
+    R = A_mat - scp.sparse.diags(A_mat_diag, 0)
+    A_mat_diag_inv = 1 / A_mat_diag
+    diag_inv = scp.sparse.diags(A_mat_diag_inv, 0)
+    R_omega = diag_inv.dot(R)
+
+    """
     negative_upper_A = (-1) * scp.sparse.triu(A_mat, k=1)
     negative_lower_A = (-1) * scp.sparse.tril(A_mat, k=-1)
     #diag_A_inv = scp.sparse.csr_matrix(np.diag(1 / (A_mat.diagonal())))
@@ -122,12 +129,16 @@ def getJacobiMatrices(A):
     R_omega = (1-omega) * \
         scp.sparse.diags(np.ones(A_mat.shape[0]), 0) + omega * Rj
     del negative_lower_A, negative_upper_A,
-    return (R_omega, diag_A_inv, A[1])
+    return (R_omega, diag_A_inv, A[1])"""
+    return (R_omega, diag_inv, A[1])
 
 
 def jacobiRelaxation(A, v, f, nw):
     for i in range(nw):
-        v = A[0].dot(v) + omega*A[1].dot(f)
+        # v = A[0].dot(v) + omega*A[1].dot(f)
+        u = (1 - omega) * v + omega * A[1].dot(f) - omega * A[0].dot(v)
+        v = u
+        #del u
     return v
 
 # With one coarsening, the number of elements in a dimension gets reduces by a factor of 2. No of elements in any dim = no of nodes in any dim -1. No of
@@ -330,7 +341,7 @@ L2_error_dolfinx = ufl.inner(uh - u_exact, uh - u_exact) * ufl.dx
 error_L2_dolfinx = np.sqrt(dolfinx.fem.assemble_scalar(L2_error_dolfinx))
 
 # Computing the FMG solution over range of V-cycles for fixed pre and post smooths
-for iter_V in range(10, mu0, 10):
+for iter_V in range(1, mu0):
     u = FullMultiGrid(A_dict_jacobi[finest_level],
                       b_dict[finest_level], iter_V)
     u_FMG = dolfinx.Function(V_dolfinx)
@@ -342,7 +353,7 @@ for iter_V in range(10, mu0, 10):
     L2_error_list.append(error_L2_FMG)
     L2_error_list_dolfinx.append(error_L2_dolfinx)
 
-x_axis = np.arange(10, mu0, 10)
+x_axis = np.arange(1, mu0)
 plt.figure(1)
 axis1 = plt.axes()
 axis1.grid(True)
