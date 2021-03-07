@@ -9,11 +9,11 @@ from mpi4py import MPI
 from petsc4py import PETSc
 import matplotlib.pyplot as plt
 
-num_elems_fine = 128
+num_elems_fine = 512
 num_elems_coarse = num_elems_fine // 2
 
-num_V_cycles = 50
-num_jacobi_iter = 100
+num_V_cycles = 30
+num_jacobi_iter = 2
 omega = 2/3
 
 mesh_fine = dolfinx.UnitSquareMesh(
@@ -112,8 +112,7 @@ dolfinx.fem.set_bc(b_coarse, [bc_coarse])
 b_vec_fine = np.array(b_fine.array).reshape((num_elems_fine+1)**2, 1)
 b_vec_coarse = np.array(b_coarse.array).reshape((num_elems_coarse+1)**2, 1)
 
-# Creating A matrices
-
+# Creating A matrices for 2 Levels
 A_mat_diag_fine = A_sp_fine.diagonal()
 R_fine = A_sp_fine - scp.sparse.diags(A_mat_diag_fine, 0)
 A_mat_diag_inv_fine = 1 / A_mat_diag_fine
@@ -288,6 +287,8 @@ def jacobi_smoothing(R_omega, diag_inv, vec, f, nu):
         vec = sol
     return vec
 
+# Function to calculate Errors
+
 
 def err_calculation(u_vec):
     u_V_cyc = dolfinx.Function(V_fine)
@@ -295,6 +296,16 @@ def err_calculation(u_vec):
     L2_error_V_cyc = ufl.inner(u_V_cyc - u_exact, u_V_cyc - u_exact) * ufl.dx
     error_L2_V_cyc = np.sqrt(dolfinx.fem.assemble_scalar(L2_error_V_cyc))
     return error_L2_V_cyc
+
+# Function to calculate Residual after each V-cycle
+
+
+def res_calculation(res):
+    res_v_cyc = dolfinx.Function(V_fine)
+    res_v_cyc.vector[:] = res
+    L2_res_v_cyc = ufl.inner(res_v_cyc, res_v_cyc)*ufl.dx
+    res_L2_v_cyc = np.sqrt(dolfinx.fem.assemble_scalar(L2_res_v_cyc))
+    return res_L2_v_cyc
 
 
 # Calculating the exact coarse solution
@@ -307,8 +318,8 @@ error_after_V_cycle = []
 residual_V_cycle = []
 #residual_after_V_cycle = []
 for i in range(0, num_V_cycles):
-    residual_V_cycle.append(np.linalg.norm(
-        b_vec_fine - A_sp_fine.dot(uh_V_cycle_soln)))
+    res = b_vec_fine - A_sp_fine.dot(uh_V_cycle_soln)
+    residual_V_cycle.append(res_calculation(res))
     error_before_V_cycle.append(err_calculation(uh_V_cycle_soln))
     # Starting at fine level Pre Smoothing
     vec_h = jacobi_smoothing(R_omega_fine, diag_inv_fine,
