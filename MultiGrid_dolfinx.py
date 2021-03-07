@@ -16,10 +16,11 @@ coarsest_level_elements_per_dim = 4
 coarsest_level_nodes_per_dim = coarsest_level_elements_per_dim + 1
 residual_per_iteration = []
 # Defining the Parameters of multigrid
-mu0 = 160
-mu1 = 100
-mu2 = 100
-omega = float(2/3)  # Parameter for Jacobi Smoother
+mu0 = 10
+mu1 = 30
+mu2 = 30
+omega = 2/3  # Parameter for Jacobi Smoother
+residual_values_v_cycles = []
 
 # Plotting Variables
 L2_error_list = []
@@ -72,7 +73,7 @@ for i in range(coarsest_level, finest_level + 1):
     bc = dolfinx.DirichletBC(uD, boundary_dofs)
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
-    f = dolfinx.Constant(mesh, -6)
+    f = dolfinx.Constant(mesh, 6)
     a = ufl.dot(ufl.grad(u), ufl.grad(v)) * ufl.dx
     A = dolfinx.fem.assemble_matrix(a, bcs=[bc])
     A.assemble()
@@ -330,7 +331,7 @@ L2_error_dolfinx = ufl.inner(uh - u_exact, uh - u_exact) * ufl.dx
 error_L2_dolfinx = np.sqrt(dolfinx.fem.assemble_scalar(L2_error_dolfinx))
 
 # Computing the FMG solution over range of V-cycles for fixed pre and post smooths
-for iter_V in range(10, mu0, 10):
+for iter_V in range(1, mu0):
     u = FullMultiGrid(A_dict_jacobi[finest_level],
                       b_dict[finest_level], iter_V)
     u_FMG = dolfinx.Function(V_dolfinx)
@@ -342,7 +343,7 @@ for iter_V in range(10, mu0, 10):
     L2_error_list.append(error_L2_FMG)
     L2_error_list_dolfinx.append(error_L2_dolfinx)
 
-x_axis = np.arange(10, mu0, 10)
+x_axis = np.arange(1, mu0)
 plt.figure(1)
 axis1 = plt.axes()
 axis1.grid(True)

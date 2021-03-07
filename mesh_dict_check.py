@@ -9,9 +9,9 @@ from petsc4py import PETSc
 from numpy.linalg import inv
 
 mesh1 = dolfinx.UnitSquareMesh(
-    MPI.COMM_WORLD, 16, 16, dolfinx.cpp.mesh.CellType.triangle)
+    MPI.COMM_WORLD, 4, 4, dolfinx.cpp.mesh.CellType.triangle)
 mesh2 = dolfinx.UnitSquareMesh(
-    MPI.COMM_WORLD, 2, 2, dolfinx.cpp.mesh.CellType.triangle)
+    MPI.COMM_WORLD, 8, 8, dolfinx.cpp.mesh.CellType.triangle)
 
 V1 = dolfinx.FunctionSpace(mesh1, ("CG", 1))
 V2 = dolfinx.FunctionSpace(mesh2, ("CG", 1))
@@ -31,9 +31,11 @@ for i in range(0, V2.dofmap.index_map.size_local * V2.dofmap.index_map_bs):
     mesh2_dict[i] = tuple([round(i, 3) for i in V2_dof_cord[i]])
     mesh2_dict[tuple([round(i, 3) for i in V2_dof_cord[i]])] = i
 
-print(V1_dof_cord[1][1])
+# print(V1_dof_cord[1][1])
 # print(mesh1_dict)
-
+print(mesh1_dict[2])
+print(mesh2_dict[5])
+print(V1_dof_cord)
 """
 uD = dolfinx.Function(V)
 uD.vector.set(0.0)

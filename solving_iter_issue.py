@@ -11,14 +11,14 @@ import matplotlib.pyplot as plt
 
 
 finest_level = 3
-coarsest_level = finest_level - 1
+coarsest_level = finest_level - 3
 coarsest_level_elements_per_dim = 8
 coarsest_level_nodes_per_dim = coarsest_level_elements_per_dim + 1
 residual_per_iteration = []
 # Defining the Parameters of multigrid
-mu0 = 3
-mu1 = 10
-mu2 = 10
+mu0 = 30
+mu1 = 100
+mu2 = 100
 omega = float(2/3)  # Parameter for Jacobi Smoother
 
 # Plotting Variables
@@ -190,7 +190,7 @@ def Interpolation2D(vec_2h, level_coarse):
                 vec_h[i] = 0.5 * (vec_2h[coarse_dof_1] +
                                   vec_2h[coarse_dof_2])
 
-                # Check if both are odd
+            # Check if both are odd
             else:
                 i_2h = (i_h - 1) / 2
                 j_2h = (j_h - 1) / 2
@@ -205,10 +205,21 @@ def Interpolation2D(vec_2h, level_coarse):
                                                  (j_2h + 1) * element_size_coarse, 0)]
                 vec_h[i] = 0.25 * (vec_2h[coarse_dof_1] + vec_2h[coarse_dof_2] +
                                    vec_2h[coarse_dof_3] + vec_2h[coarse_dof_4])
-            # TODO Boundary dof case  locate_entities_boundary
 
     # Return the interpolated vector
     return vec_h
+
+
+def Restriction2D_direct(vec_h, level_fine):
+    mesh_dict_coarse = mesh_dof_list_dict[level_fine - 1]
+    mesh_dict_fine = mesh_dof_list_dict[level_fine]
+    vec_2h_dim = (coarsest_level_elements_per_dim * 2**(level_fine-1) + 1) ** 2
+    vec_2h = np.zeros((vec_2h_dim, 1))
+    for i in range(0, vec_2h_dim):
+        coord = mesh_dict_coarse[i]
+        fine_dof = mesh_dict_fine[coord]
+        vec_2h[i] = vec_h[fine_dof]
+    return vec_2h
 
 
 def Restriction2D(vec_h, level_fine):
@@ -282,16 +293,18 @@ def Restriction2D(vec_h, level_fine):
 
 
 def V_cycle_scheme(A_h, v_h, f_h):
-    #v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
+    v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
     # Check if the space is the coarsest
     if(A_h[2] == coarsest_level):
-        v_h = spsolve(A_dict[coarsest_level][0], f_h)
-        #v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
+        #u_h = spsolve(A_dict[coarsest_level][0], f_h)
+        #u_h_vec = np.array(u_h).reshape(len(u_h), 1)
+        v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
         return v_h
     else:
-        v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
+        #v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
         # f_2h = Restriction2D((f_h - np.matmul(A_dict[A_h[2]], v_h)), A_h[2])
-        f_2h = Restriction2D((f_h - A_dict[A_h[2]][0].dot(v_h)), A_h[2])
+        r_h = f_h - A_dict[A_h[2]][0].dot(v_h)
+        f_2h = Restriction2D(r_h, A_h[2])
         v_2h = np.zeros((f_2h.shape[0], 1))
         # Fetch the Smaller discretication matrix
         A_2h = A_dict_jacobi[A_h[2] - 1]
@@ -308,8 +321,9 @@ def FullMultiGrid(A_h, f_h, iter_V):
         """v_h = np.zeros((f_h.shape[0], 1))
         for i in range(mu0):
             v_h = V_cycle_scheme(A_h, v_h, f_h)"""
-        v_h = spsolve(A_dict[coarsest_level][0], f_h)
-        return v_h
+        u_h = spsolve(A_dict[coarsest_level][0], f_h)
+        u_h_vec = np.array(u_h).reshape(len(u_h), 1)
+        return u_h_vec
     else:
         f_2h = Restriction2D(f_h, A_h[2])
         # Get the next coarse level of Discretization Matrix
@@ -380,3 +394,10 @@ plt.xlabel("V-cycles")
 plt.figtext(0.75, 0.6, text_str, fontsize=8, ha='left')
 plt.savefig(
     f'L2-Error {coarsest_level_elements_per_dim * 2**finest_level} elements.png')
+
+u_spslv = spsolve(A_dict[finest_level][0], b_dict[finest_level])
+#u_guess = np.zeros((b_dict[finest_level].shape))
+#u_direct_jacobi = jacobiRelaxation(A_dict_jacobi[finest_level], u_guess, b_dict[finest_level], 1000)
+spslv_error = np.array(u_spslv).reshape(4225, 1) - u_exact_vertex_values
+#dolfinx_error = uh.compute_point_values() - u_exact_vertex_values
+print(np.linalg.norm(spslv_error))
