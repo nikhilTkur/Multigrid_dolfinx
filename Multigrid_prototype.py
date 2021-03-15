@@ -5,22 +5,43 @@ import math
 import scipy as scp
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
+from multigrid import getJacobiMatrices, FullMultiGrid, writing_error_for_mesh_to_csv, writing_residual_for_mesh_to_csv, initialize_problem
 from mpi4py import MPI
 from petsc4py import PETSc
 import matplotlib.pyplot as plt
 import csv
 
 
+class Var_initializer:
+    def __init__(self, mesh_dof_list_dict, element_size, coarsest_level_elements_per_dim, coarsest_level, finest_level, A_sp_dict, A_jacobi_sp_dict, b_dict, mu0, mu1, mu2, omega, residual_per_V_cycle_finest, error_per_V_cycle_finest, u_exact_fine, V_fine_dolfx):
+        self.mesh_dof_list_dict = mesh_dof_list_dict
+        self.element_size = element_size
+        self.coarsest_level_elements_per_dim = coarsest_level_elements_per_dim
+        self.coarsest_level = coarsest_level
+        self.finest_level = finest_level
+        self.A_sp_dict = A_sp_dict
+        self.A_jacobi_sp_dict = A_jacobi_sp_dict
+        self.b_dict = b_dict
+        self.mu0 = mu0
+        self.mu1 = mu1
+        self.mu2 = mu2
+        self.omega = omega
+        self.residual_per_V_cycle_finest = residual_per_V_cycle_finest
+        self.error_per_V_cycle_finest = error_per_V_cycle_finest
+        self.u_exact_fine = u_exact_fine
+        self.V_fine_dolfx = V_fine_dolfx
+
+
 finest_level = 3
-coarsest_level = finest_level - 2  # For 3 Level V-Cycle
-coarsest_level_elements_per_dim = 32
+coarsest_level = finest_level - 1  # For 3 Level V-Cycle
+coarsest_level_elements_per_dim = 8
 residual_per_V_cycle_finest = []
 error_per_V_cycle_finest = []
 
 # Defining the Parameters of multigrid
-mu0 = 15  # No of V-Cycles / Level
-mu1 = 5  # Pre Relax Counts
-mu2 = 5  # Post Relax Counts
+mu0 = 2  # No of V-Cycles / Level
+mu1 = 2  # Pre Relax Counts
+mu2 = 2  # Post Relax Counts
 
 omega = 2/3  # Parameter for Jacobi Smoother
 mesh_fine = None
@@ -66,7 +87,7 @@ for i in range(coarsest_level, finest_level + 1):
     bc_i = dolfinx.DirichletBC(uD_i, boundary_dofs_i)
     u_i = ufl.TrialFunction(V_i)
     v_i = ufl.TestFunction(V_i)
-    f_i = dolfinx.Constant(mesh_i, -6)
+    f_i = dolfinx.Constant(mesh_i, 0)
     a_i = ufl.dot(ufl.grad(u_i), ufl.grad(v_i)) * ufl.dx
     A_i = dolfinx.fem.assemble_matrix(a_i, bcs=[bc_i])
     A_i.assemble()
@@ -111,259 +132,18 @@ L2_error_dolfx = ufl.inner(uh_dolfx_CG1 - u_exact_fine,
                            uh_dolfx_CG1 - u_exact_fine) * ufl.dx
 error_L2_dolfx_norm = np.sqrt(dolfinx.fem.assemble_scalar(L2_error_dolfx))
 
-
-def getJacobiMatrices(A):
-    # Takes in a Global Stiffness Matrix and gives the Final Jacobi Iteration Matrices
-    A_mat = A[0]
-    A_mat_diag = A_mat.diagonal()
-    R_mat = A_mat - scp.sparse.diags(A_mat_diag, 0)
-    A_mat_dig_inv = 1 / A_mat_diag
-    diag_A_inv = scp.sparse.diags(A_mat_dig_inv, 0)
-    R_omega_mat = diag_A_inv.dot(R_mat)
-    return (R_omega_mat, diag_A_inv, A[1])
-
-
-def jacobiRelaxation(A, v, f, nw):
-    sol = v
-    for k in range(0, nw):
-        sol = (1-omega) * v + omega * A[1].dot(f) - omega*A[0].dot(v)
-        v = sol
-    return v
-
-
-def Interpolation2D(vec_2h, level_coarse):
-    mesh_dict_coarse = mesh_dof_list_dict[level_coarse]
-    mesh_dict_fine = mesh_dof_list_dict[level_coarse + 1]
-    element_size_coarse = element_size[level_coarse]
-    element_size_fine = element_size[level_coarse + 1]
-
-    vec_h_dim = (coarsest_level_elements_per_dim *
-                 2**(level_coarse + 1) + 1) ** 2
-    vec_h = np.zeros((vec_h_dim, 1))
-
-    # Iterating over the dofs
-    for i in range(0, vec_h_dim):
-        fine_coord = mesh_dict_fine[i]  # Getting the finer level coordinates
-        coarse_dof = mesh_dict_coarse.get(fine_coord, -1)
-        if coarse_dof != -1:                # Cannot directly inject the boundary values not present in coarse grid
-            # Directly injecting the coarse dof into the fine dof value
-            vec_h[i] = vec_2h[coarse_dof]
-
-        else:
-            i_h = int(fine_coord[0] / element_size_fine)
-            j_h = int(fine_coord[1] / element_size_fine)
-            # interpolation needs to be carried out for the dof which are not the part of the coarse vector
-
-            # check if first dimension is odd and second is even
-            if i_h % 2 == 1 and j_h % 2 == 0:
-                i_2h = (i_h - 1) / 2
-                j_2h = j_h / 2
-                coarse_dof_1 = mesh_dict_coarse[(i_2h * element_size_coarse,
-                                                 j_2h * element_size_coarse, 0)]
-                coarse_dof_2 = mesh_dict_coarse[((i_2h + 1) * element_size_coarse,
-                                                 j_2h * element_size_coarse, 0)]
-                vec_h[i] = 0.5 * (vec_2h[coarse_dof_1] +
-                                  vec_2h[coarse_dof_2])
-
-            # check if first dimension is even and second is odd
-            elif i_h % 2 == 0 and j_h % 2 == 1:
-                i_2h = i_h / 2
-                j_2h = (j_h - 1) / 2
-                coarse_dof_1 = mesh_dict_coarse[(i_2h * element_size_coarse,
-                                                 j_2h * element_size_coarse, 0)]
-                coarse_dof_2 = mesh_dict_coarse[(i_2h * element_size_coarse,
-                                                 (j_2h + 1) * element_size_coarse, 0)]
-                vec_h[i] = 0.5 * (vec_2h[coarse_dof_1] +
-                                  vec_2h[coarse_dof_2])
-
-            # Check if both are odd
-            else:
-                i_2h = (i_h - 1) / 2
-                j_2h = (j_h - 1) / 2
-
-                coarse_dof_1 = mesh_dict_coarse[(i_2h * element_size_coarse,
-                                                 j_2h * element_size_coarse, 0)]
-                coarse_dof_2 = mesh_dict_coarse[((i_2h + 1) * element_size_coarse,
-                                                 j_2h * element_size_coarse, 0)]
-                coarse_dof_3 = mesh_dict_coarse[(i_2h * element_size_coarse,
-                                                 (j_2h + 1) * element_size_coarse, 0)]
-                coarse_dof_4 = mesh_dict_coarse[((i_2h + 1) * element_size_coarse,
-                                                 (j_2h + 1) * element_size_coarse, 0)]
-                vec_h[i] = 0.25 * (vec_2h[coarse_dof_1] + vec_2h[coarse_dof_2] +
-                                   vec_2h[coarse_dof_3] + vec_2h[coarse_dof_4])
-    # Return the interpolated vector
-    return vec_h
-
-
-def Restriction2D(vec_h, level_fine):
-    mesh_dict_coarse = mesh_dof_list_dict[level_fine - 1]
-    mesh_dict_fine = mesh_dof_list_dict[level_fine]
-    element_size_coarse = element_size[level_fine - 1]
-    element_size_fine = element_size[level_fine]
-
-    vec_2h_dim = (coarsest_level_elements_per_dim *
-                  2**(level_fine - 1) + 1) ** 2
-    vec_2h = np.zeros((vec_2h_dim, 1))
-
-    # Iterating over the dofs
-    for i in range(0, vec_2h_dim):
-        coarse_coord = mesh_dict_coarse[i]
-        i_2h = coarse_coord[0] / element_size_coarse
-        j_2h = coarse_coord[1] / element_size_coarse
-
-        fine_dof_1 = mesh_dict_fine.get(
-            ((2 * i_2h - 1) * element_size_fine, (2 * j_2h - 1) * element_size_fine, 0), -1)
-        fine_dof_2 = mesh_dict_fine.get(
-            ((2 * i_2h - 1) * element_size_fine, (2 * j_2h + 1) * element_size_fine, 0), -1)
-        fine_dof_3 = mesh_dict_fine.get(
-            ((2 * i_2h + 1) * element_size_fine, (2 * j_2h - 1) * element_size_fine, 0), -1)
-        fine_dof_4 = mesh_dict_fine.get(
-            ((2 * i_2h + 1) * element_size_fine, (2 * j_2h + 1) * element_size_fine, 0), -1)
-        fine_dof_5 = mesh_dict_fine.get(
-            (2 * i_2h * element_size_fine, (2 * j_2h - 1) * element_size_fine, 0), -1)
-        fine_dof_6 = mesh_dict_fine.get(
-            (2 * i_2h * element_size_fine, (2 * j_2h + 1) * element_size_fine, 0), -1)
-        fine_dof_7 = mesh_dict_fine.get(
-            ((2 * i_2h - 1) * element_size_fine, 2 * j_2h * element_size_fine, 0), -1)
-        fine_dof_8 = mesh_dict_fine.get(
-            ((2 * i_2h + 1) * element_size_fine, 2 * j_2h * element_size_fine, 0), -1)
-        fine_dof_9 = mesh_dict_fine.get(
-            (2 * i_2h * element_size_fine, 2 * j_2h * element_size_fine, 0), -1)
-        sum_1 = 0
-        sum_2 = 0
-
-        if fine_dof_1 != -1:
-            sum_1 += vec_h[fine_dof_1]
-
-        if fine_dof_2 != -1:
-            sum_1 += vec_h[fine_dof_2]
-
-        if fine_dof_3 != -1:
-            sum_1 += vec_h[fine_dof_3]
-
-        if fine_dof_4 != -1:
-            sum_1 += vec_h[fine_dof_4]
-
-        if fine_dof_5 != -1:
-            sum_2 += vec_h[fine_dof_5]
-
-        if fine_dof_6 != -1:
-            sum_2 += vec_h[fine_dof_6]
-
-        if fine_dof_7 != -1:
-            sum_2 += vec_h[fine_dof_7]
-
-        if fine_dof_8 != -1:
-            sum_2 += vec_h[fine_dof_8]
-
-        vec_2h[i] = (1/16) * (sum_1 + 2 * sum_2 + 4 * vec_h[fine_dof_9])
-
-    return vec_2h
-
-# Function to calculate the residual
-
-
-def res_calculator(res, V_space):
-    res_v_cyc = dolfinx.Function(V_space)
-    res_v_cyc.vector[:] = res
-    L2_res_v_cyc = ufl.inner(res_v_cyc, res_v_cyc)*ufl.dx
-    res_L2_v_cyc = np.sqrt(dolfinx.fem.assemble_scalar(L2_res_v_cyc))
-    return res_L2_v_cyc
-
-# Function to calculate the error L2 norm
-
-
-def err_calculator(u, u_exact, V_space):
-    u_V_cyc = dolfinx.Function(V_space)
-    u_V_cyc.vector[:] = u
-    L2_error = ufl.inner(u_V_cyc - u_exact, u_V_cyc - u_exact) * ufl.dx
-    error_L2_norm = np.sqrt(dolfinx.fem.assemble_scalar(L2_error))
-    return error_L2_norm
-
-
-#  fn for Writing the residual for a particular num_elements for finest level into a csv file
-
-
-def writing_residual_for_mesh_to_csv(residual):
-    with open(f'residual_for_{coarsest_level_elements_per_dim * 2**finest_level}.csv', mode='w') as file:
-        residual_writer = csv.writer(file, delimiter=',')
-        for i in range(0, len(residual)):
-            residual_writer.writerow([i, residual[i]])
-
-
-def writing_error_for_mesh_to_csv(error):
-    with open(f'error_for_{coarsest_level_elements_per_dim * 2**finest_level}.csv', mode='w') as file:
-        error_writer = csv.writer(file, delimiter=',')
-        for i in range(0, len(error)):
-            error_writer.writerow([i, error[i]])
-
-
-def V_cycle_scheme(A_h, v_h, f_h):
-    # Check if the space is the coarsest and solve exactly
-    if(A_h[2] == coarsest_level):
-        u_h = spsolve(A_sp_dict[coarsest_level][0], f_h)
-        u_h_vec = np.array(u_h).reshape(len(u_h), 1)
-        return u_h_vec
-    else:
-        v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
-        r_h = f_h - A_sp_dict[A_h[2]][0].dot(v_h)
-        f_2h = Restriction2D(r_h, A_h[2])
-        v_2h = np.zeros((f_2h.shape[0], 1))
-        # Fetch the Smaller discretication matrix
-        A_2h = A_jacobi_sp_dict[A_h[2] - 1]
-        v_2h = V_cycle_scheme(A_2h, v_2h, f_2h)
-    v_h = v_h + Interpolation2D(v_2h, A_h[2] - 1)
-    v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
-    return v_h
-
-
-def FullMultiGrid(A_h, f_h):
-    # Check if the space is the coarsest and solve exactly
-    if(A_h[2] == coarsest_level):
-        u_h = spsolve(A_sp_dict[coarsest_level][0], f_h)
-        u_h_vec = np.array(u_h).reshape(len(u_h), 1)
-        return u_h_vec
-    else:
-        f_2h = b_dict[A_h[2]-1]  # Fetching the exact RHS from the dict
-        # Get the next coarse level of Discretization Matrix
-        A_2h = A_jacobi_sp_dict[A_h[2] - 1]
-        v_2h = FullMultiGrid(A_2h, f_2h)
-    v_h = Interpolation2D(v_2h, A_h[2] - 1)
-    if (A_h[2] == finest_level):
-        # If at finest level , run until the residual is below E-11
-        finest_level_V_cycle_count = 0
-        while True:
-            v_h = V_cycle_scheme(A_h, v_h, f_h)
-            finest_level_V_cycle_count += 1
-            res_h = f_h - A_sp_dict[finest_level][0].dot(v_h)
-            error_norm = err_calculator(v_h, u_exact_fine, V_fine_dolfx)
-            error_per_V_cycle_finest.append(error_norm)
-            res_norm = res_calculator(res_h, V_fine_dolfx)
-            residual_per_V_cycle_finest.append(res_norm)
-            if res_norm <= 1E-11:
-                # Write the iter count for finest_elements_to CSV file and return
-                with open('iter_count_for_diff_num_elems.csv', mode='a') as file1:
-                    iter_writer = csv.writer(file1, delimiter=',')
-                    iter_writer.writerow(
-                        [coarsest_level_elements_per_dim * 2**finest_level, finest_level_V_cycle_count])
-                return v_h
-
-    else:
-        # Else run for a specified number of V-Cycles
-        for i in range(mu0):
-            v_h = V_cycle_scheme(A_h, v_h, f_h)
-        return v_h
-
-
 for key, value in A_sp_dict.items():
     A_jacobi_sp_dict[key] = getJacobiMatrices(value)
 
+parameter = Var_initializer(mesh_dof_list_dict, element_size, coarsest_level_elements_per_dim, coarsest_level, finest_level, A_sp_dict,
+                            A_jacobi_sp_dict, b_dict, mu0, mu1, mu2, omega, residual_per_V_cycle_finest, error_per_V_cycle_finest, u_exact_fine, V_fine_dolfx)
+initialize_problem(parameter)
 
 u_FMG = FullMultiGrid(A_jacobi_sp_dict[finest_level], b_dict[finest_level])
 writing_residual_for_mesh_to_csv(residual_per_V_cycle_finest)
 writing_error_for_mesh_to_csv(error_per_V_cycle_finest)
 
 # Writing the final_error of CG1 dolfinx for comparison
-with open(f'error_for_{coarsest_level_elements_per_dim * 2**finest_level}.csv', mode='a') as file:
+with open(f'error_for_{coarsest_level_elements_per_dim * 2**finest_level}_{finest_level-coarsest_level +1}_levels.csv', mode='a') as file:
     error_writer_dolfx = csv.writer(file, delimiter=',')
     error_writer_dolfx.writerow(['Dolf', error_L2_dolfx_norm])
