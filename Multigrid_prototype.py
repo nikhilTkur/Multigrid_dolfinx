@@ -147,3 +147,4 @@ writing_error_for_mesh_to_csv(error_per_V_cycle_finest)
 with open(f'error_for_{coarsest_level_elements_per_dim * 2**finest_level}_{finest_level-coarsest_level +1}_levels.csv', mode='a') as file:
     error_writer_dolfx = csv.writer(file, delimiter=',')
     error_writer_dolfx.writerow(['Dolf', error_L2_dolfx_norm])
+#
