@@ -56,14 +56,14 @@ def getJacobiMatrices(A):
     return (R_omega_mat, diag_A_inv, A[1])
 
 
-def Interpolation2D(vec_2h, level_coarse):
-    mesh_dict_coarse = mesh_dof_list_dict[level_coarse]
+def Interpolation2D(vec_2h, mesh_dict_coarse, mesh_dict_fine, element_size_coarse, element_size_fine, vec_h_dim):
+    """mesh_dict_coarse = mesh_dof_list_dict[level_coarse]
     mesh_dict_fine = mesh_dof_list_dict[level_coarse + 1]
     element_size_coarse = element_size[level_coarse]
     element_size_fine = element_size[level_coarse + 1]
 
     vec_h_dim = (coarsest_level_elements_per_dim *
-                 2**(level_coarse + 1) + 1) ** 2
+                 2**(level_coarse + 1) + 1) ** 2"""
     vec_h = np.zeros((vec_h_dim, 1))
 
     # Iterating over the dofs
@@ -120,10 +120,10 @@ def Interpolation2D(vec_2h, level_coarse):
     return vec_h
 
 
-def Restriction2D_direct(vec_h, level_fine):
-    mesh_dict_coarse = mesh_dof_list_dict[level_fine - 1]
+def Restriction2D_direct(vec_h, mesh_dict_coarse, mesh_dict_fine, vec_2h_dim):
+    """mesh_dict_coarse = mesh_dof_list_dict[level_fine - 1]
     mesh_dict_fine = mesh_dof_list_dict[level_fine]
-    vec_2h_dim = (coarsest_level_elements_per_dim * 2**(level_fine-1) + 1) ** 2
+    vec_2h_dim = (coarsest_level_elements_per_dim * 2**(level_fine-1) + 1) ** 2"""
     vec_2h = np.zeros((vec_2h_dim, 1))
     for i in range(0, vec_2h_dim):
         coord = mesh_dict_coarse[i]
@@ -132,14 +132,14 @@ def Restriction2D_direct(vec_h, level_fine):
     return vec_2h
 
 
-def Restriction2D(vec_h, level_fine):
-    mesh_dict_coarse = mesh_dof_list_dict[level_fine - 1]
+def Restriction2D(vec_h, mesh_dict_coarse, mesh_dict_fine, element_size_coarse, element_size_fine, vec_2h_dim):
+    """mesh_dict_coarse = mesh_dof_list_dict[level_fine - 1]
     mesh_dict_fine = mesh_dof_list_dict[level_fine]
     element_size_coarse = element_size[level_fine - 1]
     element_size_fine = element_size[level_fine]
 
     vec_2h_dim = (coarsest_level_elements_per_dim *
-                  2**(level_fine - 1) + 1) ** 2
+                  2**(level_fine - 1) + 1) ** 2"""
     vec_2h = np.zeros((vec_2h_dim, 1))
 
     # Iterating over the dofs
@@ -230,35 +230,47 @@ def jacobiRelaxation(A, v, f, nw):
 
 def V_cycle_scheme(A_h, v_h, f_h):
     # Check if the space is the coarsest and solve exactly
-    if(A_h[2] == coarsest_level):
+    current_level = A_h[2]
+    if(current_level == coarsest_level):
         u_h = spsolve(A_sp_dict[coarsest_level][0], f_h)
         u_h_vec = np.array(u_h).reshape(len(u_h), 1)
         return u_h_vec
     else:
         v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
         r_h = f_h - A_sp_dict[A_h[2]][0].dot(v_h)
-        f_2h = Restriction2D_direct(r_h, A_h[2])
+        #f_2h = Restriction2D_direct(r_h, A_h[2])
+
+        f_2h_dim = (coarsest_level_elements_per_dim *
+                    2**(current_level - 1) + 1) ** 2
+        """f_2h = Restriction2D_(r_h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
+                             element_size[current_level-1], element_size[current_level], f_2h_dim)"""
+        f_2h = Restriction2D_direct(
+            r_h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level], f_2h_dim)
         v_2h = np.zeros((f_2h.shape[0], 1))
         # Fetch the Smaller discretication matrix
         A_2h = A_jacobi_sp_dict[A_h[2] - 1]
         v_2h = V_cycle_scheme(A_2h, v_2h, f_2h)
-    v_h = v_h + Interpolation2D(v_2h, A_h[2] - 1)
+    #v_h = v_h + Interpolation2D(v_2h, A_h[2] - 1)
+    v_h = v_h + Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
+                                element_size[current_level-1], element_size[current_level], f_h.shape[0])
     v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
     return v_h
 
 
 def FullMultiGrid(A_h, f_h):
+    current_level = A_h[2]
     # Check if the space is the coarsest and solve exactly
-    if(A_h[2] == coarsest_level):
+    if(current_level == coarsest_level):
         u_h = spsolve(A_sp_dict[coarsest_level][0], f_h)
         u_h_vec = np.array(u_h).reshape(len(u_h), 1)
         return u_h_vec
     else:
         f_2h = b_dict[A_h[2]-1]  # Fetching the exact RHS from the dict
         # Get the next coarse level of Discretization Matrix
-        A_2h = A_jacobi_sp_dict[A_h[2] - 1]
+        A_2h = A_jacobi_sp_dict[current_level - 1]
         v_2h = FullMultiGrid(A_2h, f_2h)
-    v_h = Interpolation2D(v_2h, A_h[2] - 1)
+    v_h = Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
+                          element_size[current_level-1], element_size[current_level], f_h.shape[0])
     if (A_h[2] == finest_level):
         # If at finest level , run until the residual is below E-11
         finest_level_V_cycle_count = 0
