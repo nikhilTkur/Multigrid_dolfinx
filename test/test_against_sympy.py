@@ -51,6 +51,23 @@ def test_against_sympy():
     fine_vertices = [(sympy.Rational(j, 4), sympy.Rational(i, 4))
                      for i in range(5) for j in range(5)]
 
+    def restrict(v):
+        return [v[0], v[2], v[4], v[10], v[12], v[14], v[20], v[22], v[24]]
+
+    def interpolate(v):
+        return [v[0], (v[0] + v[1]) / 2, v[1], (v[1] + v[2]) / 2, v[2],
+                (v[0] + v[3]) / 2, (v[0] + v[4]) / 2, (v[1] + v[4]) / 2, (v[1] + v[5]) / 2, (v[2] + v[5]) / 2,
+                v[3], (v[3] + v[4]) / 2, v[4], (v[4] + v[5]) / 2, v[5],
+                (v[3] + v[6]) / 2, (v[3] + v[7]) / 2, (v[3] + v[7]) / 2, (v[4] + v[8]) / 2, (v[5] + v[8]) / 2,
+                v[6], (v[6] + v[7]) / 2, v[7], (v[7] + v[8]) / 2, v[8]]
+
+    def solve(A, b):
+        return sympy.Matrix(A).inv() * sympy.Matrix(b)
+
+    def jacobi(A, b, xk):
+        dim = len(A)
+        return [1 / A[i,i] * (b[i] - sum(A[i, j] * xk[j] for j in range(dim) if j != i))
+                for i in range(dim)]
 
     A_coarse = [[0 for i in range(9)] for j in range(9)]
     b_coarse = [0 for i in range(9)]
