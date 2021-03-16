@@ -54,5 +54,8 @@ jobs:
           cmake --install build
           python3 -m pip -v install --global-option build --global-option --debug dolfinx/python/
 
+      - name: Install requirements
+        run: |
+          python3 -m pip install sympy
       - name: Run unit tests
         run: python3 -m pytest -v test/
