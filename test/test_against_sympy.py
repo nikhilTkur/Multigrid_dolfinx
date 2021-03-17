@@ -241,6 +241,7 @@ def run_sympy_multigrid():
     for N in range(10):
         for i in range(3):
             solution_fine = jacobi(A_fine, b_fine, solution_fine)
+        # TODO: should this be b - Ax?
         residual_fine = sympy.Matrix(A_fine) * sympy.Matrix(solution_fine) - sympy.Matrix(b_fine)
         residual_coarse = restrict(residual_fine)
         solution_coarse = solve(A_coarse, residual_coarse)
