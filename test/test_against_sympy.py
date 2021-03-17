@@ -1,8 +1,10 @@
 import dolfinx
 import ufl
 import sympy
+import scipy
 from mpi4py import MPI
 import numpy as np
+from multigrid import getJacobiMatrices, FullMultiGrid, writing_error_for_mesh_to_csv, writing_residual_for_mesh_to_csv, initialize_problem
 
 
 x = sympy.Symbol("x")
@@ -175,8 +177,8 @@ def make_fenics_Ab(n):
     A_dolf = dolfinx.fem.assemble_matrix(a, bcs=[bc])
     A_dolf.assemble()
 
-    x_coarse = ufl.SpatialCoordinate(mesh)
-    b = ufl.inner(f(x_coarse), v) * ufl.dx
+    x = ufl.SpatialCoordinate(mesh)
+    b = ufl.inner(f(x), v) * ufl.dx
     b_dolf = dolfinx.fem.assemble_vector(b)
     dolfinx.fem.apply_lifting(b_dolf, [a], [[bc]])
     dolfinx.fem.set_bc(b_dolf, [bc])
@@ -252,23 +254,77 @@ def run_sympy_multigrid():
 
 
 def run_fenics_multigrid():
+    class Parameters:
+        def __init__(self):
+            self.mesh_dof_list_dict = None
+            self.element_size = {1: 0.5, 2: 0.25}
+            self.coarsest_level_elements_per_dim = 1
+            self.coarsest_level = 1
+            self.finest_level = 2
+            self.A_sp_dict = None
+            self.A_jacobi_sp_dict = None
+            self.b_dict = None
+            self.mu0 = 1
+            self.mu1 = 3
+            self.mu2 = 3
+            self.omega = 1
+            self.residual_per_V_cycle_finest = []
+            self.error_per_V_cycle_finest = []
+            self.u_exact_fine = None
+            self.V_fine_dolfx = None
+
     space_coarse, A_coarse, b_coarse = make_fenics_coarse_Ab()
     space_fine, A_fine, b_fine = make_fenics_fine_Ab()
-    raise NotImplementedError()
+
+    x_fine = ufl.SpatialCoordinate(space_fine.mesh)
+
+    p = Parameters()
+    p.mesh_dof_list_dict = {}
+    # COARSE
+    dof_dict = {}
+    dof_coords = space_coarse.tabulate_dof_coordinates()
+    for j in range(0, space_coarse.dofmap.index_map.size_local * space_coarse.dofmap.index_map_bs):
+        cord_tup = tuple(round(cor, 9) for cor in dof_coords[j])
+        dof_dict[j] = cord_tup
+        dof_dict[cord_tup] = j
+    p.mesh_dof_list_dict[1] = dof_dict
+    # FINE
+    dof_dict = {}
+    dof_coords = space_fine.tabulate_dof_coordinates()
+    for j in range(0, space_fine.dofmap.index_map.size_local * space_fine.dofmap.index_map_bs):
+        cord_tup = tuple(round(cor, 9) for cor in dof_coords[j])
+        dof_dict[j] = cord_tup
+        dof_dict[cord_tup] = j
+    p.mesh_dof_list_dict[2] = dof_dict
+
+    p.u_exact_fine = x_fine[0] * (1 - x_fine[0]) * x_fine[1] * (1 - x_fine[1])
+    p.V_fine_dolfx = space_fine
+    p.A_sp_dict = {1: (scipy.sparse.csr_matrix(A_coarse.getValuesCSR()[::-1]), 1),
+                   2: (scipy.sparse.csr_matrix(A_fine.getValuesCSR()[::-1]), 2)}
+    p.b_dict = {1: np.array(b_coarse.array).reshape(9, 1),
+                2: np.array(b_fine.array).reshape(25, 1)}
+    p.A_jacobi_sp_dict = {key: getJacobiMatrices(value) for key, value in p.A_sp_dict.items()}
+
+    initialize_problem(p)
+    u_FMG = FullMultiGrid(p.A_jacobi_sp_dict[2], p.b_dict[2])
+
+    return space_fine, [0*u_FMG, u_FMG]
 
 
 def test_multigrid_run():
+    space_fine, fenics_data = run_fenics_multigrid()
     sympy_data = run_sympy_multigrid()
-    fenics_data = run_fenics_multigrid()
 
     # Test fine matrix and vector
     dolfin_to_sympy = []
-    for i, co in enumerate(space.tabulate_dof_coordinates()):
+    for i, co in enumerate(space_fine.tabulate_dof_coordinates()):
         for j, co2 in enumerate(fine_vertices):
             if np.allclose(co[:2], [float(k) for k in co2]):
                 dolfin_to_sympy.append(j)
         assert len(dolfin_to_sympy) == i + 1
 
-    for sympy_v, fenics_v in zip(sympy_data, fenics_data):
+    for sympy_v, fenics_v in zip(sympy_data[-1:], fenics_data[-1:]):
+        print(fenics_v.T[0])
+        print([float(sympy_v[j]) for j in dolfin_to_sympy])
         for i, j in enumerate(dolfin_to_sympy):
-            assert np.isclose(float(sympy_v[j]), fenics_v[i])
+            assert np.isclose(float(sympy_v[j]), fenics_v[i, 0])
