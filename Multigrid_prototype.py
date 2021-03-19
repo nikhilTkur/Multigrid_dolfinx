@@ -33,15 +33,15 @@ class Var_initializer:
 
 
 finest_level = 3
-coarsest_level = finest_level - 1  # For 3 Level V-Cycle
+coarsest_level = finest_level - 2  # For 3 Level V-Cycle
 coarsest_level_elements_per_dim = 8
 residual_per_V_cycle_finest = []
 error_per_V_cycle_finest = []
 
 # Defining the Parameters of multigrid
 mu0 = 2  # No of V-Cycles / Level
-mu1 = 2  # Pre Relax Counts
-mu2 = 2  # Post Relax Counts
+mu1 = 50  # Pre Relax Counts
+mu2 = 50  # Post Relax Counts
 
 omega = 2/3  # Parameter for Jacobi Smoother
 mesh_fine = None
@@ -87,7 +87,7 @@ for i in range(coarsest_level, finest_level + 1):
     bc_i = dolfinx.DirichletBC(uD_i, boundary_dofs_i)
     u_i = ufl.TrialFunction(V_i)
     v_i = ufl.TestFunction(V_i)
-    f_i = dolfinx.Constant(mesh_i, 0)
+    f_i = dolfinx.Constant(mesh_i, -6)
     a_i = ufl.dot(ufl.grad(u_i), ufl.grad(v_i)) * ufl.dx
     A_i = dolfinx.fem.assemble_matrix(a_i, bcs=[bc_i])
     A_i.assemble()

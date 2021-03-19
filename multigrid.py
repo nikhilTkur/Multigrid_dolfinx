@@ -237,7 +237,7 @@ def V_cycle_scheme(A_h, v_h, f_h):
         return u_h_vec
     else:
         v_h = jacobiRelaxation(A_h, v_h, f_h, mu1)
-        r_h = f_h - A_sp_dict[A_h[2]][0].dot(v_h)
+        r_h = f_h - A_sp_dict[current_level][0].dot(v_h)
         #f_2h = Restriction2D_direct(r_h, A_h[2])
 
         f_2h_dim = (coarsest_level_elements_per_dim *
@@ -248,13 +248,13 @@ def V_cycle_scheme(A_h, v_h, f_h):
             r_h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level], f_2h_dim)
         v_2h = np.zeros((f_2h.shape[0], 1))
         # Fetch the Smaller discretication matrix
-        A_2h = A_jacobi_sp_dict[A_h[2] - 1]
+        A_2h = A_jacobi_sp_dict[current_level - 1]
         v_2h = V_cycle_scheme(A_2h, v_2h, f_2h)
-    #v_h = v_h + Interpolation2D(v_2h, A_h[2] - 1)
-    v_h = v_h + Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
-                                element_size[current_level-1], element_size[current_level], f_h.shape[0])
-    v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
-    return v_h
+        #v_h = v_h + Interpolation2D(v_2h, A_h[2] - 1)
+        v_h = v_h + Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
+                                    element_size[current_level-1], element_size[current_level], f_h.shape[0])
+        v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
+        return v_h
 
 
 def FullMultiGrid(A_h, f_h):
@@ -265,35 +265,35 @@ def FullMultiGrid(A_h, f_h):
         u_h_vec = np.array(u_h).reshape(len(u_h), 1)
         return u_h_vec
     else:
-        f_2h = b_dict[A_h[2]-1]  # Fetching the exact RHS from the dict
+        f_2h = b_dict[current_level-1]  # Fetching the exact RHS from the dict
         # Get the next coarse level of Discretization Matrix
         A_2h = A_jacobi_sp_dict[current_level - 1]
         v_2h = FullMultiGrid(A_2h, f_2h)
-    v_h = Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
-                          element_size[current_level-1], element_size[current_level], f_h.shape[0])
-    if (A_h[2] == finest_level):
-        # If at finest level , run until the residual is below E-11
-        finest_level_V_cycle_count = 0
-        while True:
-            v_h = V_cycle_scheme(A_h, v_h, f_h)
-            finest_level_V_cycle_count += 1
-            res_h = f_h - A_sp_dict[finest_level][0].dot(v_h)
-            error_norm = err_calculator(v_h, u_exact_fine, V_fine_dolfx)
-            error_per_V_cycle_finest.append(error_norm)
-            res_norm = res_calculator(res_h, V_fine_dolfx)
-            residual_per_V_cycle_finest.append(res_norm)
-            if res_norm <= 1E-11:
-                # Write the iter count for finest_elements_to CSV file and return
-                with open(f'iter_count_for_diff_num_elems_{finest_level-coarsest_level +1}_levels.csv', mode='a') as file1:
-                    iter_writer = csv.writer(file1, delimiter=',')
-                    iter_writer.writerow(
-                        [coarsest_level_elements_per_dim * 2**finest_level, finest_level_V_cycle_count])
-                return v_h
-    else:
-        # Else run for a specified number of V-Cycles
-        for i in range(mu0):
-            v_h = V_cycle_scheme(A_h, v_h, f_h)
-        return v_h
+        v_h = Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
+                              element_size[current_level-1], element_size[current_level], f_h.shape[0])
+        if (current_level == finest_level):
+            # If at finest level , run until the residual is below E-11
+            finest_level_V_cycle_count = 0
+            while True:
+                v_h = V_cycle_scheme(A_h, v_h, f_h)
+                finest_level_V_cycle_count += 1
+                res_h = f_h - A_sp_dict[finest_level][0].dot(v_h)
+                error_norm = err_calculator(v_h, u_exact_fine, V_fine_dolfx)
+                error_per_V_cycle_finest.append(error_norm)
+                res_norm = res_calculator(res_h, V_fine_dolfx)
+                residual_per_V_cycle_finest.append(res_norm)
+                if res_norm <= 1E-11:
+                    # Write the iter count for finest_elements_to CSV file and return
+                    with open(f'iter_count_for_diff_num_elems_{finest_level-coarsest_level +1}_levels.csv', mode='a') as file1:
+                        iter_writer = csv.writer(file1, delimiter=',')
+                        iter_writer.writerow(
+                            [coarsest_level_elements_per_dim * 2**finest_level, finest_level_V_cycle_count])
+                    return v_h
+        else:
+            # Else run for a specified number of V-Cycles
+            for i in range(mu0):
+                v_h = V_cycle_scheme(A_h, v_h, f_h)
+            return v_h
 
 #  fn for Writing the residual for a particular num_elements for finest level into a csv file
 

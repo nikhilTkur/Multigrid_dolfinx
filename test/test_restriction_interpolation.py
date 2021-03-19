@@ -119,7 +119,7 @@ b_vec_coarse = np.array(b_coarse.array).reshape((num_elems_coarse+1)**2, 1)
 b_vec_restricted = Restriction2D_direct(
     b_vec_fine, mesh_dof_dict_coarse, mesh_dof_dict_fine, b_vec_coarse.shape[0])
 b_vec_interpolated = Interpolation2D(
-    b_vec_coarse, mesh_dof_dict_coarse, mesh_dof_dict_fine, b_vec_fine.shape[0])
+    b_vec_coarse, mesh_dof_dict_coarse, mesh_dof_dict_fine, element_size_coarse, element_size_fine, b_vec_fine.shape[0])
 diff_interpolation = b_vec_interpolated - b_vec_fine
 diff_restricted = b_vec_restricted - b_vec_coarse
 assert abs(diff_restricted) < 1E-2
