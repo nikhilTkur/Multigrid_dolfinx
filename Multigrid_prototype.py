@@ -5,7 +5,7 @@ import math
 import scipy as scp
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
-from multigrid import getJacobiMatrices, FullMultiGrid, writing_error_for_mesh_to_csv, writing_residual_for_mesh_to_csv, initialize_problem
+from multigrid import getJacobiMatrices, FullMultiGrid, writing_error_for_mesh_to_csv, writing_residual_for_mesh_to_csv, initialize_problem, FullMultiGrid_test
 from mpi4py import MPI
 from petsc4py import PETSc
 import matplotlib.pyplot as plt
@@ -138,13 +138,19 @@ for key, value in A_sp_dict.items():
 parameter = Var_initializer(mesh_dof_list_dict, element_size, coarsest_level_elements_per_dim, coarsest_level, finest_level, A_sp_dict,
                             A_jacobi_sp_dict, b_dict, mu0, mu1, mu2, omega, residual_per_V_cycle_finest, error_per_V_cycle_finest, u_exact_fine, V_fine_dolfx)
 initialize_problem(parameter)
+test = True
+u_FMG_test, residual_fine_restricted, error_coarse, error_coarse_to_fine_interp = FullMultiGrid_test(
+    A_jacobi_sp_dict[finest_level], b_dict[finest_level], test)
+print(u_FMG_test.shape)
+print(residual_fine_restricted.shape)
+print(error_coarse.shape)
+print(error_coarse_to_fine_interp.shape)
+# u_FMG = FullMultiGrid(A_jacobi_sp_dict[finest_level], b_dict[finest_level])
+# writing_residual_for_mesh_to_csv(residual_per_V_cycle_finest)
+# writing_error_for_mesh_to_csv(error_per_V_cycle_finest)
 
-u_FMG = FullMultiGrid(A_jacobi_sp_dict[finest_level], b_dict[finest_level])
-writing_residual_for_mesh_to_csv(residual_per_V_cycle_finest)
-writing_error_for_mesh_to_csv(error_per_V_cycle_finest)
-
-# Writing the final_error of CG1 dolfinx for comparison
-with open(f'error_for_{coarsest_level_elements_per_dim * 2**finest_level}_{finest_level-coarsest_level +1}_levels.csv', mode='a') as file:
-    error_writer_dolfx = csv.writer(file, delimiter=',')
-    error_writer_dolfx.writerow(['Dolf', error_L2_dolfx_norm])
-#
+# # Writing the final_error of CG1 dolfinx for comparison
+# with open(f'error_for_{coarsest_level_elements_per_dim * 2**finest_level}_{finest_level-coarsest_level +1}_levels.csv', mode='a') as file:
+#     error_writer_dolfx = csv.writer(file, delimiter=',')
+#     error_writer_dolfx.writerow(['Dolf', error_L2_dolfx_norm])
+# #

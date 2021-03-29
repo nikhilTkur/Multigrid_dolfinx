@@ -228,7 +228,11 @@ def jacobiRelaxation(A, v, f, nw):
     return v
 
 
-def V_cycle_scheme(A_h, v_h, f_h):
+def V_cycle_scheme(A_h, v_h, f_h, test=False):
+    residual_fine_restricted = None
+    error_coarse = None
+    error_coarse_to_fine_interp = None
+
     # Check if the space is the coarsest and solve exactly
     current_level = A_h[2]
     if(current_level == coarsest_level):
@@ -249,12 +253,19 @@ def V_cycle_scheme(A_h, v_h, f_h):
         v_2h = np.zeros((f_2h.shape[0], 1))
         # Fetch the Smaller discretication matrix
         A_2h = A_jacobi_sp_dict[current_level - 1]
-        v_2h = V_cycle_scheme(A_2h, v_2h, f_2h)
+        v_2h = V_cycle_scheme(A_2h, v_2h, f_2h, test)
         #v_h = v_h + Interpolation2D(v_2h, A_h[2] - 1)
-        v_h = v_h + Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
-                                    element_size[current_level-1], element_size[current_level], f_h.shape[0])
+        err_h = Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
+                                element_size[current_level-1], element_size[current_level], f_h.shape[0])
+        v_h = v_h + err_h
         v_h = jacobiRelaxation(A_h, v_h, f_h, mu2)
-        return v_h
+        if test and current_level == finest_level:
+            residual_fine_restricted = f_2h
+            error_coarse = v_2h
+            error_coarse_to_fine_interp = err_h
+            return v_h, residual_fine_restricted, error_coarse, error_coarse_to_fine_interp
+        else:
+            return v_h
 
 
 def FullMultiGrid(A_h, f_h):
@@ -294,6 +305,39 @@ def FullMultiGrid(A_h, f_h):
             for i in range(mu0):
                 v_h = V_cycle_scheme(A_h, v_h, f_h)
             return v_h
+
+# FMG_test for bug
+
+
+def FullMultiGrid_test(A_h, f_h, test=False):
+    residual_fine_restricted = None
+    error_coarse = None
+    error_coarse_to_fine_interp = None
+
+    current_level = A_h[2]
+    # Check if the space is the coarsest and solve exactly
+    if(current_level == coarsest_level):
+        u_h = spsolve(A_sp_dict[coarsest_level][0], f_h)
+        u_h_vec = np.array(u_h).reshape(len(u_h), 1)
+        return u_h_vec
+    else:
+        f_2h = b_dict[current_level-1]  # Fetching the exact RHS from the dict
+        # Get the next coarse level of Discretization Matrix
+        A_2h = A_jacobi_sp_dict[current_level - 1]
+        v_2h = FullMultiGrid_test(A_2h, f_2h, test)
+        v_h = Interpolation2D(v_2h, mesh_dof_list_dict[current_level-1], mesh_dof_list_dict[current_level],
+                              element_size[current_level-1], element_size[current_level], f_h.shape[0])
+        for i in range(mu0):
+            if current_level == finest_level:
+                v_h, residual_fine_restricted, error_coarse, error_coarse_to_fine_interp = V_cycle_scheme(
+                    A_h, v_h, f_h, test)
+            else:
+                v_h = V_cycle_scheme(A_h, v_h, f_h)
+        if test and current_level == finest_level:
+            return v_h, residual_fine_restricted, error_coarse, error_coarse_to_fine_interp
+        else:
+            return v_h
+
 
 #  fn for Writing the residual for a particular num_elements for finest level into a csv file
 
